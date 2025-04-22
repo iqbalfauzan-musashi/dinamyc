@@ -1,6 +1,6 @@
 import React from 'react'
 import { CProgress, CProgressStacked, CTooltip } from '@coreui/react'
-import { calculateTimePosition, calculateCurrentTimePosition, isTimeInShift } from './TimeUtils'
+import { calculateTimePosition, calculateCurrentTimePosition, isTimeInShift, parseDbTime } from './TimeUtils'
 import { getOperationColor } from './ShiftCalculations'
 
 const ShiftProgressBar = ({
@@ -37,12 +37,12 @@ const ShiftProgressBar = ({
     if (shift.data && shift.data.length > 0) {
       // Sort data by timestamp and filter out future data
       const sortedData = [...shift.data]
-        .filter((record) => new Date(record.CreatedAt) <= currentTime)
-        .sort((a, b) => new Date(a.CreatedAt).getTime() - new Date(b.CreatedAt).getTime())
+        .filter((record) => parseDbTime(record.CreatedAt) <= currentTime)
+        .sort((a, b) => parseDbTime(a.CreatedAt).getTime() - parseDbTime(b.CreatedAt).getTime())
 
       // Find relevant records for this shift
       const shiftRecords = sortedData.filter((record) => {
-        const recordTime = new Date(record.CreatedAt)
+        const recordTime = parseDbTime(record.CreatedAt)
         const recordHour = recordTime.getHours()
         const recordMinute = recordTime.getMinutes()
 
@@ -56,7 +56,7 @@ const ShiftProgressBar = ({
       if (latestBeforeShift && shiftRecords.length > 0) {
         // Check if there's a gap between shift start and first record in shift
         const firstShiftRecord = shiftRecords[0]
-        const firstRecordTime = new Date(firstShiftRecord.CreatedAt)
+        const firstRecordTime = parseDbTime(firstShiftRecord.CreatedAt)
         const shiftStartTime = new Date(firstRecordTime)
 
         // Set to shift start time
@@ -96,7 +96,7 @@ const ShiftProgressBar = ({
         // Process data to create continuous segments
         for (let i = 0; i < combinedRecords.length; i++) {
           const record = combinedRecords[i]
-          const recordTime = new Date(record.CreatedAt)
+          const recordTime = parseDbTime(record.CreatedAt)
           const recordHour = recordTime.getHours()
           const recordMinute = recordTime.getMinutes()
 
@@ -116,7 +116,7 @@ const ShiftProgressBar = ({
           if (i < combinedRecords.length - 1) {
             // If there's a next record, use its time
             const nextRecord = combinedRecords[i + 1]
-            const nextTime = new Date(nextRecord.CreatedAt)
+            const nextTime = parseDbTime(nextRecord.CreatedAt)
             const nextHour = nextTime.getHours()
             const nextMinute = nextTime.getMinutes()
 

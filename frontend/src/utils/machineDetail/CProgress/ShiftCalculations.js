@@ -1,4 +1,5 @@
 // ShiftCalculations.js - Contains shift-related calculation functions
+import { parseDbTime } from './TimeUtils'
 
 // Function to find the latest data point before the shift starts
 export const findLatestDataBeforeShift = (allData, shiftStartHour, currentTime) => {
@@ -9,14 +10,14 @@ export const findLatestDataBeforeShift = (allData, shiftStartHour, currentTime) 
 
   // Sort all data by timestamp (ascending)
   const sortedData = [...allData].sort(
-    (a, b) => new Date(a.CreatedAt).getTime() - new Date(b.CreatedAt).getTime(),
+    (a, b) => parseDbTime(a.CreatedAt).getTime() - parseDbTime(b.CreatedAt).getTime(),
   )
 
   // Find the latest record before shift start
   let latestBeforeShift = null
 
   for (const record of sortedData) {
-    const recordTime = new Date(record.CreatedAt)
+    const recordTime = parseDbTime(record.CreatedAt)
 
     // Skip records with timestamps in the future
     if (recordTime > currentTime) continue
@@ -42,8 +43,8 @@ export const calculateHourlyProduction = (data, shiftHours, currentTime) => {
 
   // Sort data by timestamp and filter out future data
   const sortedData = [...data]
-    .filter((record) => new Date(record.CreatedAt) <= currentTime)
-    .sort((a, b) => new Date(a.CreatedAt).getTime() - new Date(b.CreatedAt).getTime())
+    .filter((record) => parseDbTime(record.CreatedAt) <= currentTime)
+    .sort((a, b) => parseDbTime(a.CreatedAt).getTime() - parseDbTime(b.CreatedAt).getTime())
 
   // Initialize hourly counters
   const hourlyProduction = Array(shiftHours.length).fill(0)
@@ -58,7 +59,7 @@ export const calculateHourlyProduction = (data, shiftHours, currentTime) => {
   sortedData.forEach((record) => {
     if (!record.CreatedAt || record.MACHINE_COUNTER === undefined) return
 
-    const recordTime = new Date(record.CreatedAt)
+    const recordTime = parseDbTime(record.CreatedAt)
     const recordHour = recordTime.getHours()
 
     // Find which hour bucket this record belongs to
