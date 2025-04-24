@@ -1,383 +1,163 @@
-import React, { useState, useEffect, useRef } from 'react'
-import axios from 'axios'
+import React from 'react'
 import {
-  CRow,
-  CCol,
   CCard,
   CCardBody,
   CCardHeader,
-  CSpinner,
+  CRow,
+  CCol,
   CProgress,
-  CFormSelect,
-  CBadge,
+  CProgressStacked,
 } from '@coreui/react'
-import { Link } from 'react-router-dom'
-import {
-  getStatusConfig,
-  generateDefaultSignal,
-} from '../../utils/signalLightConfig/signalLightConfig.js'
-import '../../scss/signalLightConfig.scss'
 
-const Karawang = () => {
-  const [machineNames, setMachineNames] = useState([])
-  const [lineGroups, setLineGroups] = useState([])
-  const [selectedLineGroup, setSelectedLineGroup] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [filteredMachines, setFilteredMachines] = useState([])
-  const [location] = useState('KRW')
-  const [lastUpdate, setLastUpdate] = useState(new Date())
-  const [socketConnected, setSocketConnected] = useState(false)
+const MachineDetail = () => {
+  // Define shift data with hours and progress values
+  const shifts = [
+    {
+      name: 'Shift 1',
+      hours: [
+        '07:00',
+        '08:00',
+        '09:00',
+        '10:00',
+        '11:00',
+        '12:00',
+        '13:00',
+        '14:00',
+        '15:00',
+        '16:00',
+      ],
+      progressValues: [60],
+      progressValues2: [30],
+      progressValues3: [10],
+    },
+    {
+      name: 'Shift 2',
+      hours: [
+        '16:00',
+        '17:00',
+        '18:00',
+        '19:00',
+        '20:00',
+        '21:00',
+        '22:00',
+        '23:00',
+        '00:00',
+        '01:00',
+      ],
+      progressValues: [50],
+      progressValues2: [5],
+      progressValues3: [20],
+    },
+    {
+      name: 'Shift 3',
+      hours: ['01:00', '02:00', '03:00', '04:00', '05:00', '06:00', '07:00'],
+      progressValues: [10],
+      progressValues2: [15],
+      progressValues3: [10],
+    },
+  ]
 
-  // WebSocket reference
-  const socketRef = useRef(null)
-
-  // Konversi kode lokasi ke nama untuk URL
-  const locationUrlName = location === 'KRW' ? 'karawang' : 'cikarang'
-
-  // Fetch line groups once
-  useEffect(() => {
-    const fetchLineGroups = async () => {
-      try {
-        const response = await axios.get(`/api/machine-names/${location}/line-groups`)
-        setLineGroups(response.data.map((group) => group.LINE_GROUP))
-      } catch (err) {
-        console.error('Error fetching line groups:', err)
-        setError(err)
-      }
-    }
-
-    fetchLineGroups()
-  }, [location])
-
-  // Initial data fetch
-  const fetchInitialData = async () => {
-    try {
-      setLoading(true)
-
-      // Make parallel API calls for machine names and production history
-      const [machineResponse, historyResponse] = await Promise.all([
-        axios.get(`/api/machine-names/${location}`, {
-          params: selectedLineGroup ? { lineGroup: selectedLineGroup } : undefined,
-        }),
-        axios.get(`/api/machine-history/${location}`, {
-          params: selectedLineGroup ? { lineGroup: selectedLineGroup } : undefined,
-        }),
-      ])
-
-      // Transform machine data
-      const transformedData = machineResponse.data.map((machine) => {
-        // Find the most recent history record for this machine
-        const machineHistory =
-          historyResponse.data
-            .filter((history) => history.MachineCode === machine.MACHINE_CODE)
-            .sort((a, b) => new Date(b.CreatedAt) - new Date(a.CreatedAt))[0] || {}
-
-        const statusConfig = getStatusConfig(machineHistory.OPERATION_NAME || 'Shutdown')
-
-        // Calculate performance metrics
-        const actual = machineHistory.MACHINE_COUNTER || 0
-        const plan = 1000 // You may want to define a way to get planned production
-        const performance = plan > 0 ? Math.round((actual / plan) * 100) : 0
-
-        return {
-          no_mesin: machine.MACHINE_CODE,
-          mesin: machine.MACHINE_NAME,
-          lineGroup: machine.LINE_GROUP,
-          status: machineHistory.OPERATION_NAME || 'Shutdown',
-          message: statusConfig.displayName,
-          Plan: plan,
-          actual: actual,
-          performance: `${performance}%`,
-          startTime: machineHistory.CreatedAt,
-          statusConfig: statusConfig,
-        }
-      })
-
-      setMachineNames(transformedData)
-      applyLineGroupFilter(transformedData)
-      setLastUpdate(new Date())
-      setLoading(false)
-    } catch (err) {
-      console.error('Error fetching initial machine data:', err)
-      setError(err)
-      setLoading(false)
-    }
+  const gridContainerStyle = {
+    position: 'relative',
+    width: '100%',
+    marginBottom: '5px',
+    padding: '0',
+    height: '120px',
   }
 
-  // Apply filtering based on selected line group
-  const applyLineGroupFilter = (machines) => {
-    if (selectedLineGroup === '') {
-      setFilteredMachines(machines)
-    } else {
-      setFilteredMachines(machines.filter((machine) => machine.lineGroup === selectedLineGroup))
-    }
+  const gridLineStyle = {
+    position: 'absolute',
+    top: 25,
+    bottom: 25,
+    width: '2px',
+    backgroundColor: 'rgba(200, 200, 200, 0.5)',
+    zIndex: 1,
   }
 
-  // Setup WebSocket connection
-  useEffect(() => {
-    // Fetch initial data first
-    fetchInitialData()
-
-    // Establish WebSocket connection
-    const setupWebSocket = () => {
-      // Use secure WebSocket if on HTTPS, otherwise standard WebSocket
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = window.location.host
-
-      // Build URL with query parameters for location and lineGroup
-      let wsUrl = `${protocol}//${host}/ws/machines?location=${location}`
-      if (selectedLineGroup) {
-        wsUrl += `&lineGroup=${selectedLineGroup}`
-      }
-
-      if (socketRef.current) {
-        socketRef.current.close()
-      }
-
-      const socket = new WebSocket(wsUrl)
-
-      socket.onopen = () => {
-        console.log('WebSocket connection established')
-        setSocketConnected(true)
-      }
-
-      socket.onmessage = (event) => {
-        try {
-          const messageData = JSON.parse(event.data)
-
-          // Check if this is a machineData message
-          if (messageData.type === 'machineData') {
-            setMachineNames(messageData.data)
-            applyLineGroupFilter(messageData.data)
-            setLastUpdate(new Date(messageData.timestamp))
-          }
-        } catch (error) {
-          console.error('Error processing WebSocket message:', error)
-        }
-      }
-
-      socket.onclose = (event) => {
-        console.log('WebSocket connection closed:', event.code, event.reason)
-        setSocketConnected(false)
-
-        // Attempt to reconnect after a delay if not closed intentionally
-        if (event.code !== 1000) {
-          setTimeout(() => {
-            console.log('Attempting to reconnect WebSocket...')
-            setupWebSocket()
-          }, 3000)
-        }
-      }
-
-      socket.onerror = (error) => {
-        console.error('WebSocket error:', error)
-        setSocketConnected(false)
-      }
-
-      socketRef.current = socket
-    }
-
-    setupWebSocket()
-
-    // Cleanup WebSocket on component unmount
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.close()
-      }
-    }
-  }, [location, selectedLineGroup]) // Include selectedLineGroup in dependencies
-
-  // Handle line group change
-  const handleLineGroupChange = (e) => {
-    const lineGroup = e.target.value
-    setSelectedLineGroup(lineGroup)
+  const timeTextStyle = {
+    position: 'absolute',
+    transform: 'translateX(-50%)',
+    width: 'auto',
+    fontSize: '0.9rem',
+    padding: '0 5px',
   }
 
-  // Manual refresh function
-  const handleManualRefresh = () => {
-    fetchInitialData()
-  }
-
-  // Send filter update to WebSocket server
-  const updateFilters = () => {
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(
-        JSON.stringify({
-          type: 'setFilters',
-          location: location,
-          lineGroup: selectedLineGroup,
-        }),
-      )
-    }
-  }
-
-  // Update filters when line group changes
-  useEffect(() => {
-    updateFilters()
-    // Also apply filtering to existing machine data
-    applyLineGroupFilter(machineNames)
-  }, [selectedLineGroup])
-
-  // Error handling
-  if (error) {
-    return (
-      <CRow>
-        <CCol className="text-center text-danger">
-          Error loading machine names: {error.message}
-          <div className="mt-3">
-            <button className="btn btn-primary" onClick={handleManualRefresh}>
-              Retry
-            </button>
-          </div>
-        </CCol>
-      </CRow>
-    )
+  // Updated progress container style with height property for thicker bars
+  const progressContainerStyle = {
+    position: 'absolute',
+    left: '0',
+    right: '0',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    zIndex: 2,
+    padding: '0',
+    height: '32px', // Added height for thicker progress bars
   }
 
   return (
-    <>
-      <CRow className="mb-3">
-        <CCol md={6}>
-          <h2>Karawang Machine Monitor</h2>
-        </CCol>
-        <CCol md={6} className="text-end">
-          <div className="d-flex justify-content-end align-items-center">
-            <CBadge
-              color={socketConnected ? 'success' : 'danger'}
-              shape="rounded-pill"
-              className="me-3 px-3 py-2"
-            >
-              {socketConnected ? 'Connected' : 'Disconnected'}
-            </CBadge>
-            <span className="me-3">Last updated: {lastUpdate.toLocaleTimeString()}</span>
-            <button
-              className="btn btn-outline-primary"
-              onClick={handleManualRefresh}
-              disabled={loading}
-            >
-              {loading ? <CSpinner size="sm" /> : <span>↻ Refresh</span>}
-            </button>
-          </div>
-        </CCol>
-      </CRow>
+    <div>
+      {/* Added styles for thicker progress bars */}
+      <style>
+        {`
+          .progress-stacked {
+            height: 32px !important;
+          }
+          .progress-stacked .progress {
+            height: 32px !important;
+          }
+          .progress-stacked .progress-bar {
+            height: 32px !important;
+            font-size: 1rem !important;
+          }
+        `}
+      </style>
 
-      <CRow className="mb-3 align-items-center">
-        <CCol md={4}>
-          <CFormSelect value={selectedLineGroup} onChange={handleLineGroupChange}>
-            <option value="">All Line Groups</option>
-            {lineGroups.map((group, index) => (
-              <option key={index} value={group}>
-                {group}
-              </option>
-            ))}
-          </CFormSelect>
-        </CCol>
-        <CCol md={8} className="text-end">
-          <CBadge color="primary" shape="rounded-pill" className="px-3 py-2">
-            Total Machines: {filteredMachines.length}
-          </CBadge>
-        </CCol>
-      </CRow>
+      {/* Production details section */}
+      <h2>Detail Production</h2>
+      <CRow>
+        {shifts.map((shift, index) => (
+          <CCol md={12} key={index}>
+            <CCard className="mb-3">
+              <CCardHeader className="text-body">
+                <strong>{shift.name}</strong>
+              </CCardHeader>
+              <CCardBody className="p-4">
+                <div style={gridContainerStyle}>
+                  {shift.hours.map((hour, index) => {
+                    const position = `${(100 * index) / (shift.hours.length - 1)}%`
+                    return (
+                      <React.Fragment key={index}>
+                        <span style={{ ...timeTextStyle, top: '0', left: position }}>{hour}</span>
+                        <div style={{ ...gridLineStyle, left: position }} />
+                        <span style={{ ...timeTextStyle, bottom: '0', left: position }}>
+                          {index * 10}
+                        </span>
+                      </React.Fragment>
+                    )
+                  })}
 
-      {/* Main Content Area */}
-      {loading ? (
-        <CRow>
-          <CCol className="text-center">
-            <CSpinner color="primary" />
+                  {/* Progress bar with updated positioning */}
+                  <div style={progressContainerStyle}>
+                    <CProgressStacked className="progress-stacked">
+                      {shift.progressValues.map((value, valueIndex) => (
+                        <CProgress key={valueIndex} color="success" value={value} />
+                      ))}
+                      {shift.progressValues2.map((value, valueIndex) => (
+                        <CProgress key={`2-${valueIndex}`} color="danger" value={value} />
+                      ))}
+                      {shift.progressValues3.map((value, valueIndex) => (
+                        <CProgress key={`3-${valueIndex}`} color="warning" value={value} />
+                      ))}
+                    </CProgressStacked>
+                  </div>
+                </div>
+              </CCardBody>
+            </CCard>
           </CCol>
-        </CRow>
-      ) : (
-        <CRow className="d-flex align-items-stretch">
-          {filteredMachines.map((data, index) => {
-            const statusConfig = data.statusConfig || getStatusConfig(data.status)
-            const { borderColor, headerColor } = statusConfig
-            const signalClasses = generateDefaultSignal(data.status)
-            const progress = data.actual ? Math.min((data.actual / (data.Plan || 1)) * 100, 100) : 0
-
-            return (
-              <CCol md={2} sm={2} className="mb-4 px-2" key={index}>
-                <CCard className="machine-card-wrapper mb-4" style={{ borderColor }}>
-                  <CCardHeader
-                    className="machine-card-header"
-                    style={{ backgroundColor: headerColor }}
-                  >
-                    <Link
-                      to={`/${locationUrlName}/machine/${encodeURIComponent(data.no_mesin)}`}
-                      style={{
-                        color: 'white',
-                        textDecoration: 'none',
-                        cursor: 'pointer',
-                        width: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        textTransform: 'uppercase',
-                        textAlign: 'center',
-                      }}
-                    >
-                      <strong className="machine-code">{data.no_mesin}</strong>
-                      <span className="machine-name">{data.mesin}</span>
-                    </Link>
-                  </CCardHeader>
-
-                  <CCardBody className="machine-card-body">
-                    <div className="status-message">
-                      <strong
-                        title={
-                          data.startTime
-                            ? `Last updated: ${new Date(data.startTime).toLocaleString()}`
-                            : ''
-                        }
-                      >
-                        {data.message}
-                      </strong>
-                    </div>
-
-                    <div className="machine-info-container">
-                      <div className="signal-tower">
-                        {signalClasses.map((signalClass, i) => {
-                          const isGreenLight = i === 2
-                          const isNormalOperation = data.status.toLowerCase() === 'normal operation'
-
-                          return (
-                            <div
-                              key={i}
-                              className={`signal ${signalClass} ${isNormalOperation && isGreenLight ? 'blinking' : ''}`}
-                            />
-                          )
-                        })}
-                      </div>
-
-                      <div className="machine-details">
-                        <p>
-                          <strong>No. Mesin:</strong> {data.no_mesin}
-                        </p>
-                        <p>
-                          <strong>Plan:</strong> {data.Plan}
-                        </p>
-                        <div className="metric-container">
-                          <strong>Actual:</strong> {data.actual}
-                          <CProgress height={10} value={progress} />
-                        </div>
-                        <div className="metric-container">
-                          <strong>Performance:</strong> {data.performance}
-                          <CProgress
-                            height={10}
-                            value={parseFloat(data.performance.replace('%', ''))}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </CCardBody>
-                </CCard>
-              </CCol>
-            )
-          })}
-        </CRow>
-      )}
-    </>
+        ))}
+      </CRow>
+    </div>
   )
 }
 
-export default Karawang
+export default MachineDetail

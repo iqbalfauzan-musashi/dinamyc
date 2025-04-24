@@ -2,53 +2,53 @@
 
 // Convert database time to display time without timezone conversion
 export const parseDbTime = (dateString) => {
-  if (!dateString) return new Date();
-  
+  if (!dateString) return new Date()
+
   try {
     // Handle different date formats - some might come as ISO strings
     if (dateString.includes('T')) {
-      const date = new Date(dateString);
-      return date;
+      const date = new Date(dateString)
+      return date
     }
-    
+
     // Parse database timestamp exactly as received, without timezone conversion
-    const parts = dateString.split(' ');
+    const parts = dateString.split(' ')
     // If we can't split the string properly, return current date
-    if (!parts || parts.length < 2) return new Date();
-    
-    const datePart = parts[0];
-    const timePart = parts[1];
-    
+    if (!parts || parts.length < 2) return new Date()
+
+    const datePart = parts[0]
+    const timePart = parts[1]
+
     // If we don't have date or time part, return current date
-    if (!datePart || !timePart) return new Date();
-    
-    const [year, month, day] = datePart.split('-').map(Number);
-    
+    if (!datePart || !timePart) return new Date()
+
+    const [year, month, day] = datePart.split('-').map(Number)
+
     // Handle time part which might include milliseconds
-    const timeComponents = timePart.split('.');
-    const [hours, minutes, seconds] = timeComponents[0].split(':').map(Number);
-    
+    const timeComponents = timePart.split('.')
+    const [hours, minutes, seconds] = timeComponents[0].split(':').map(Number)
+
     // Create a local date with the exact components from database
-    const date = new Date();
-    date.setFullYear(year);
-    date.setMonth(month - 1); // JavaScript months are 0-based
-    date.setDate(day);
-    date.setHours(hours);
-    date.setMinutes(minutes);
-    date.setSeconds(seconds);
-    
+    const date = new Date()
+    date.setFullYear(year)
+    date.setMonth(month - 1) // JavaScript months are 0-based
+    date.setDate(day)
+    date.setHours(hours)
+    date.setMinutes(minutes)
+    date.setSeconds(seconds)
+
     // If there are milliseconds, set them
     if (timeComponents.length > 1) {
-      const ms = parseInt(timeComponents[1], 10);
+      const ms = parseInt(timeComponents[1], 10)
       if (!isNaN(ms)) {
-        date.setMilliseconds(ms);
+        date.setMilliseconds(ms)
       }
     }
-    
-    return date;
+
+    return date
   } catch (error) {
-    console.error("Error parsing date:", error, "for dateString:", dateString);
-    return new Date();
+    console.error('Error parsing date:', error, 'for dateString:', dateString)
+    return new Date()
   }
 }
 
@@ -117,8 +117,8 @@ export const calculateCurrentTimePosition = (
 
 // Format time for display according to backend format
 export const formatDbTime = (date) => {
-  if (!date) return '';
-  const hours = date.getHours().toString().padStart(2, '0');
-  const minutes = date.getMinutes().toString().padStart(2, '0');
-  return `${hours}:${minutes}`;
+  if (!date) return ''
+  const hours = date.getHours().toString().padStart(2, '0')
+  const minutes = date.getMinutes().toString().padStart(2, '0')
+  return `${hours}:${minutes}`
 }
