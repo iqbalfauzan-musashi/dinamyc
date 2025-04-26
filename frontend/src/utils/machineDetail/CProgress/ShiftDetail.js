@@ -48,24 +48,24 @@ const ShiftDetail = ({ shifts, selectedDate }) => {
   }
 
   // Get all data across shifts - with error handling
-  let allShiftData = [];
+  let allShiftData = []
   try {
-    allShiftData = getAllData(shifts || []);
+    allShiftData = getAllData(shifts || [])
   } catch (err) {
-    console.error("Error getting all shift data:", err);
-    setError("Error processing shift data. Please try refreshing the page.");
+    console.error('Error getting all shift data:', err)
+    setError('Error processing shift data. Please try refreshing the page.')
   }
 
   return (
     <>
       <h2>Detail Production</h2>
-      
+
       {error && (
         <CAlert color="danger" dismissible onClose={() => setError(null)}>
           {error}
         </CAlert>
       )}
-      
+
       {(shifts || []).map((shift, index) => {
         try {
           // Get shift hours - ensure we're using the correct hours as defined in the data
@@ -112,27 +112,27 @@ const ShiftDetail = ({ shifts, selectedDate }) => {
             : currentTime
 
           // Find the latest data before this shift starts - with error handling
-          let latestBeforeShift = null;
+          let latestBeforeShift = null
           try {
             latestBeforeShift = findLatestDataBeforeShift(
               allShiftData,
               shiftStartHour,
-              referenceTime
+              referenceTime,
             )
           } catch (err) {
-            console.error("Error finding latest data before shift:", err);
+            console.error('Error finding latest data before shift:', err)
           }
 
           // Calculate hourly production values - with error handling
-          let hourlyProduction = [];
+          let hourlyProduction = []
           try {
             hourlyProduction = calculateHourlyProduction(
               shift.data || [],
               shiftHours,
-              referenceTime
+              referenceTime,
             )
           } catch (err) {
-            console.error("Error calculating hourly production:", err);
+            console.error('Error calculating hourly production:', err)
           }
 
           return (
@@ -144,7 +144,7 @@ const ShiftDetail = ({ shifts, selectedDate }) => {
                 </CCardHeader>
                 <CCardBody className="p-4">
                   <ShiftProgressBar
-                    shift={{...shift, data: shift.data || []}}
+                    shift={{ ...shift, data: shift.data || [] }}
                     shiftHours={shiftHours}
                     startHourNum={startHourNum}
                     endHourNum={endHourNum}
@@ -164,7 +164,7 @@ const ShiftDetail = ({ shifts, selectedDate }) => {
             </CCol>
           )
         } catch (err) {
-          console.error(`Error rendering shift ${index}:`, err);
+          console.error(`Error rendering shift ${index}:`, err)
           return (
             <CCol md={12} key={index}>
               <CCard className="mb-3">

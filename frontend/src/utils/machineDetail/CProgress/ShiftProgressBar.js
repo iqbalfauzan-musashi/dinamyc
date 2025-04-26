@@ -1,6 +1,11 @@
 import React from 'react'
 import { CProgress, CProgressStacked, CTooltip } from '@coreui/react'
-import { calculateTimePosition, calculateCurrentTimePosition, isTimeInShift, parseDbTime } from './TimeUtils'
+import {
+  calculateTimePosition,
+  calculateCurrentTimePosition,
+  isTimeInShift,
+  parseDbTime,
+} from './TimeUtils'
 import { getOperationColor } from './ShiftCalculations'
 
 const ShiftProgressBar = ({

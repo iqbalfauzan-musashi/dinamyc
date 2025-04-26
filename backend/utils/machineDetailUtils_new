@@ -1,0 +1,211 @@
+// utils/machineDetailUtils.js
+
+/**
+ * Process machine data to organize by shifts
+ * @param {Array} data - Raw machine data records
+ * @returns {Array} - Processed shift data
+ */
+const processShiftData = (data) => {
+  // Define shift time ranges
+  const shifts = [
+    { name: "Shift 1", start: 7, end: 16 }, // 07:00 - 16:00
+    { name: "Shift 2", start: 16, end: 1 }, // 16:00 - 01:00
+    { name: "Shift 3", start: 1, end: 7 }, // 01:00 - 07:00
+  ];
+
+  // Group data by timestamp date
+  const dataByDate = {};
+
+  data.forEach((record) => {
+    const timestamp = new Date(record.CreatedAt);
+    const dateStr = timestamp.toISOString().slice(0, 10);
+
+    if (!dataByDate[dateStr]) {
+      dataByDate[dateStr] = [];
+    }
+
+    // Get the hour from the timestamp
+    const hour = timestamp.getHours();
+
+    // Determine which shift this record belongs to
+    let shiftIndex = -1;
+    if (hour >= shifts[0].start && hour < shifts[0].end) {
+      shiftIndex = 0; // Shift 1
+    } else if ((hour >= shifts[1].start && hour <= 23) || hour === 0) {
+      shiftIndex = 1; // Shift 2
+    } else if (hour >= shifts[2].start && hour < shifts[2].end) {
+      shiftIndex = 2; // Shift 3
+    }
+
+    if (shiftIndex !== -1) {
+      dataByDate[dateStr].push({
+        timestamp: timestamp,
+        shiftIndex: shiftIndex,
+        status: record.OPERATION_NAME,
+        counter: record.MACHINE_COUNTER,
+      });
+    }
+  });
+
+  // Convert data to array format expected by frontend
+  const result = [];
+
+  Object.keys(dataByDate).forEach((date) => {
+    const dateRecords = dataByDate[date];
+
+    // Group by shift
+    const shiftData = [[], [], []];
+    dateRecords.forEach((record) => {
+      shiftData[record.shiftIndex].push(record);
+    });
+
+    // Process each shift
+    shifts.forEach((shift, index) => {
+      if (shiftData[index].length > 0) {
+        result.push({
+          date: date,
+          timestamp: shiftData[index][0].timestamp,
+          shift: shift.name,
+          shiftIndex: index,
+          records: shiftData[index].sort((a, b) => a.timestamp - b.timestamp),
+          status: calculateShiftStatus(shiftData[index]),
+        });
+      }
+    });
+  });
+
+  return result;
+};
+
+/**
+ * Calculate the overall status of a shift
+ * @param {Array} records - Records for a specific shift
+ * @returns {Object} - Status counts and percentages
+ */
+const calculateShiftStatus = (records) => {
+  // Count status occurrences
+  const statusCounts = {
+    "NORMAL OPERATION": 0,
+    CHOKOTEI: 0,
+    "TIDAK NORMAL": 0,
+    other: 0,
+  };
+
+  records.forEach((record) => {
+    if (statusCounts[record.status] !== undefined) {
+      statusCounts[record.status]++;
+    } else {
+      statusCounts.other++;
+    }
+  });
+
+  const total = records.length;
+
+  // Calculate percentages
+  const percentages = {};
+  for (const status in statusCounts) {
+    percentages[status] =
+      total > 0 ? Math.round((statusCounts[status] / total) * 100) : 0;
+  }
+
+  return {
+    counts: statusCounts,
+    percentages: percentages,
+    total: total,
+  };
+};
+
+/**
+ * Prepare chart data for visualization
+ * @param {Array} data - Raw machine data records
+ * @returns {Object} - Formatted chart data
+ */
+const prepareChartData = (data) => {
+  // Group data by date
+  const dataByDate = {};
+
+  data.forEach((record) => {
+    const timestamp = new Date(record.CreatedAt);
+    const dateStr = timestamp.toISOString().slice(0, 10);
+
+    if (!dataByDate[dateStr]) {
+      dataByDate[dateStr] = {
+        date: dateStr,
+        total: 0,
+        normalOperation: 0,
+        chokotei: 0,
+        tidakNormal: 0,
+        other: 0,
+        hourlyData: {},
+      };
+    }
+
+    // Increment status counters
+    dataByDate[dateStr].total++;
+
+    if (record.OPERATION_NAME === "NORMAL OPERATION") {
+      dataByDate[dateStr].normalOperation++;
+    } else if (record.OPERATION_NAME === "CHOKOTEI") {
+      dataByDate[dateStr].chokotei++;
+    } else if (record.OPERATION_NAME === "TIDAK NORMAL") {
+      dataByDate[dateStr].tidakNormal++;
+    } else {
+      dataByDate[dateStr].other++;
+    }
+
+    // Add hourly data
+    const hour = timestamp.getHours();
+    const hourKey = `${hour}`;
+
+    if (!dataByDate[dateStr].hourlyData[hourKey]) {
+      dataByDate[dateStr].hourlyData[hourKey] = {
+        hour: hourKey,
+        count: 0,
+        normalOperation: 0,
+        chokotei: 0,
+        tidakNormal: 0,
+        other: 0,
+      };
+    }
+
+    dataByDate[dateStr].hourlyData[hourKey].count++;
+
+    if (record.OPERATION_NAME === "NORMAL OPERATION") {
+      dataByDate[dateStr].hourlyData[hourKey].normalOperation++;
+    } else if (record.OPERATION_NAME === "CHOKOTEI") {
+      dataByDate[dateStr].hourlyData[hourKey].chokotei++;
+    } else if (record.OPERATION_NAME === "TIDAK NORMAL") {
+      dataByDate[dateStr].hourlyData[hourKey].tidakNormal++;
+    } else {
+      dataByDate[dateStr].hourlyData[hourKey].other++;
+    }
+  });
+
+  // Convert hourlyData objects to arrays for easier charting
+  Object.keys(dataByDate).forEach((date) => {
+    const hourlyArray = [];
+    for (let hour = 0; hour < 24; hour++) {
+      const hourKey = `${hour}`;
+      if (dataByDate[date].hourlyData[hourKey]) {
+        hourlyArray.push(dataByDate[date].hourlyData[hourKey]);
+      } else {
+        hourlyArray.push({
+          hour: hourKey,
+          count: 0,
+          normalOperation: 0,
+          chokotei: 0,
+          tidakNormal: 0,
+          other: 0,
+        });
+      }
+    }
+    dataByDate[date].hourlyData = hourlyArray;
+  });
+
+  return Object.values(dataByDate);
+};
+
+module.exports = {
+  processShiftData,
+  prepareChartData,
+};

@@ -4,7 +4,7 @@ const router = express.Router();
 const {
   prepareChartData,
   processShiftData,
-} = require("../utils/machineDetailUtils");
+} = require("../utils/machineDetailUtils_new");
 
 // Get machine detail based on machine code
 router.get("/:machineCode", async (req, res) => {
