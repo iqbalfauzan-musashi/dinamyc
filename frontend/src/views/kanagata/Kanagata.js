@@ -25,272 +25,431 @@ const MachineDetail = () => {
     try {
       setLoading(true)
       setError(null)
-      const response = await axios.get(getApiUrl(`machine-detail/${machineCode}`))
-      const processedData = processDataForDisplay(response.data, date)
+
+      const mainDate = new Date(date)
+      const nextDate = new Date(mainDate)
+      nextDate.setDate(nextDate.getDate() + 1)
+      const nextDateStr = nextDate.toISOString().slice(0, 10)
+
+      const [mainResponse, shift3Response] = await Promise.all([
+        axios.get(getApiUrl(`machine-detail/${machineCode}?date=${date}`)),
+        axios.get(getApiUrl(`machine-detail/${machineCode}?date=${nextDateStr}`)),
+      ])
+
+      const processedData = processDataForDisplay(
+        mainResponse.data,
+        shift3Response.data,
+        date,
+        nextDateStr,
+      )
       setMachineData(processedData)
     } catch (err) {
-      console.error('Error fetching machine data:', err)
       setError('Failed to load machine data. Please try again later.')
+      console.error('Error fetching data:', err)
     } finally {
       setLoading(false)
     }
   }
 
-  const processDataForDisplay = (data, selectedDate) => {
+  const processDataForDisplay = (mainData, shift3Data, selectedDate, nextDateStr) => {
     const shiftRanges = [
       { name: 'Shift 1', start: 7, end: 16 },
       { name: 'Shift 2', start: 16, end: 0 },
       { name: 'Shift 3', start: 0, end: 7 },
     ]
 
-    const rawRecords = []
-
     const selectedDateObj = new Date(selectedDate)
-    const nextDateObj = new Date(selectedDate)
+    selectedDateObj.setHours(0, 0, 0, 0)
+
+    const nextDateObj = new Date(selectedDateObj)
     nextDateObj.setDate(nextDateObj.getDate() + 1)
 
-    const selectedDateStr = selectedDateObj.toISOString().slice(0, 10)
-    const nextDateStr = nextDateObj.toISOString().slice(0, 10)
+    const shift1Start = new Date(selectedDateObj)
+    shift1Start.setHours(7, 0, 0, 0)
+
+    const shift1End = new Date(selectedDateObj)
+    shift1End.setHours(16, 0, 0, 0)
+
+    const shift2Start = new Date(selectedDateObj)
+    shift2Start.setHours(16, 0, 0, 0)
+
+    const shift2End = new Date(nextDateObj)
+    shift2End.setHours(0, 0, 0, 0)
+
+    const shift3Start = new Date(nextDateObj)
+    shift3Start.setHours(0, 0, 0, 0)
+
+    const shift3End = new Date(nextDateObj)
+    shift3End.setHours(7, 0, 0, 0)
+
+    const rawRecordsForShift1And2 = processShiftRecords(
+      mainData,
+      selectedDateObj,
+      nextDateObj,
+      shift1Start,
+      shift3End,
+      'shift1and2',
+    )
+
+    const rawRecordsForShift3 = processShiftRecords(
+      shift3Data,
+      nextDateObj,
+      new Date(nextDateObj.getTime() + 86400000),
+      shift3Start,
+      shift3End,
+      'shift3',
+    )
+
+    const rawRecords = [...rawRecordsForShift1And2, ...rawRecordsForShift3]
+
+    rawRecords.sort((a, b) => a.displayTimestamp - b.displayTimestamp)
+
+    const shifts = shiftRanges.map((shiftRange) => {
+      let shiftStartTime, shiftEndTime
+
+      if (shiftRange.name === 'Shift 1') {
+        shiftStartTime = shift1Start
+        shiftEndTime = shift1End
+      } else if (shiftRange.name === 'Shift 2') {
+        shiftStartTime = shift2Start
+        shiftEndTime = shift2End
+      } else {
+        shiftStartTime = shift3Start
+        shiftEndTime = shift3End
+      }
+
+      const shiftRecords = rawRecords.filter((record) => {
+        const recordDate = record.displayTimestamp.toISOString().slice(0, 10)
+        if (shiftRange.name === 'Shift 1') {
+          return (
+            recordDate === selectedDate &&
+            record.displayTimestamp.getHours() >= 7 &&
+            record.displayTimestamp.getHours() < 16
+          )
+        } else if (shiftRange.name === 'Shift 2') {
+          return (
+            recordDate === selectedDate &&
+            record.displayTimestamp.getHours() >= 16 &&
+            record.displayTimestamp.getHours() < 24
+          )
+        } else {
+          return (
+            recordDate === nextDateStr &&
+            record.displayTimestamp.getHours() >= 0 &&
+            record.displayTimestamp.getHours() < 7
+          )
+        }
+      })
+
+      let previousShiftLastStatus = null
+      let previousShiftLastTimestamp = null
+      let previousShiftLastRawTime = null
+
+      if (shiftRange.name === 'Shift 2') {
+        const shift1Records = rawRecords.filter(
+          (record) =>
+            record.displayTimestamp.toISOString().slice(0, 10) === selectedDate &&
+            record.displayTimestamp.getHours() >= 7 &&
+            record.displayTimestamp.getHours() < 16,
+        )
+
+        if (shift1Records.length > 0) {
+          previousShiftLastStatus = shift1Records[shift1Records.length - 1].status
+          previousShiftLastTimestamp = shift1Records[shift1Records.length - 1].timestamp
+          previousShiftLastRawTime = shift1Records[shift1Records.length - 1].rawTime
+        }
+      } else if (shiftRange.name === 'Shift 3') {
+        const shift2Records = rawRecords.filter(
+          (record) =>
+            record.displayTimestamp.toISOString().slice(0, 10) === selectedDate &&
+            record.displayTimestamp.getHours() >= 16 &&
+            record.displayTimestamp.getHours() < 24,
+        )
+
+        if (shift2Records.length > 0) {
+          previousShiftLastStatus = shift2Records[shift2Records.length - 1].status
+          previousShiftLastTimestamp = shift2Records[shift2Records.length - 1].timestamp
+          previousShiftLastRawTime = shift2Records[shift2Records.length - 1].rawTime
+        }
+      }
+
+      const processedRecords = []
+
+      if (previousShiftLastStatus) {
+        const continuityTimestamp = new Date(shiftStartTime)
+
+        let continuityDisplayTime
+        if (shiftRange.name === 'Shift 2') {
+          continuityDisplayTime = `16:00`
+        } else if (shiftRange.name === 'Shift 3') {
+          continuityDisplayTime = `00:00`
+        }
+
+        processedRecords.push({
+          timestamp: continuityTimestamp,
+          displayTimestamp: continuityTimestamp,
+          status: previousShiftLastStatus,
+          isContinuity: true,
+          sourceTimestamp: previousShiftLastTimestamp,
+          sourceTime: previousShiftLastRawTime,
+          displayTime: continuityDisplayTime,
+        })
+      }
+
+      shiftRecords.forEach((record) => {
+        processedRecords.push({
+          timestamp: record.timestamp,
+          displayTimestamp: record.displayTimestamp,
+          status: record.status,
+          displayTime: record.rawTime,
+        })
+      })
+
+      processedRecords.sort((a, b) => a.displayTimestamp - b.displayTimestamp)
+
+      const progressSegments = createProgressSegments(
+        shiftRange,
+        shiftStartTime,
+        shiftEndTime,
+        processedRecords,
+      )
+
+      return {
+        name: shiftRange.name,
+        progressSegments: progressSegments,
+        shiftStartHour: shiftRange.start,
+        shiftEndHour: shiftRange.end,
+      }
+    })
+
+    return {
+      machineInfo: mainData.machineInfo,
+      shifts: shifts,
+    }
+  }
+
+  const processShiftRecords = (data, dateObj, nextDayObj, startTime, endTime, shiftGroup) => {
+    const rawRecords = []
 
     if (data.shifts && Array.isArray(data.shifts)) {
       data.shifts.forEach((shift) => {
         if (shift.records && Array.isArray(shift.records)) {
           shift.records.forEach((record) => {
-            const recordDate = new Date(record.timestamp)
+            const timestampStr = record.timestamp
 
-            // Force the hours to be as in the original timestamp
-            // This fixes timezone issues by using the hours directly from the timestamp string
-            const timestampParts = record.timestamp.split('T')[1].split(':')
-            const recordHour = parseInt(timestampParts[0], 10)
-            recordDate.setHours(recordHour)
+            const dbTimeMatch = timestampStr.match(/\d{2}:\d{2}:\d{2}/)
+            const dbTimeStr = dbTimeMatch ? dbTimeMatch[0] : null
+            const dbTimeComponents = dbTimeStr ? dbTimeStr.split(':') : null
+            const dbHours = dbTimeComponents ? parseInt(dbTimeComponents[0]) : null
+            const dbMinutes = dbTimeComponents ? parseInt(dbTimeComponents[1]) : null
+            const formattedTime =
+              dbHours !== null && dbMinutes !== null
+                ? `${dbHours.toString().padStart(2, '0')}:${dbMinutes.toString().padStart(2, '0')}`
+                : null
 
-            const recordDateStr = recordDate.toISOString().slice(0, 10)
+            const recordTimestamp = new Date(timestampStr)
+            const recordDateStr = recordTimestamp.toISOString().slice(0, 10)
+            let displayTimestamp
 
-            if (
-              (recordDateStr === selectedDateStr && recordHour >= 7) ||
-              (recordDateStr === nextDateStr && recordHour < 7)
-            ) {
-              let shiftDate
-              if (recordDateStr === selectedDateStr) {
-                shiftDate = new Date(selectedDateStr)
-              } else {
-                shiftDate = new Date(nextDateStr)
+            if (shiftGroup === 'shift1and2') {
+              const selectedDateStr = dateObj.toISOString().slice(0, 10)
+              if (recordDateStr !== selectedDateStr) {
+                return
               }
 
-              // Use the original hours from the timestamp string
-              shiftDate.setHours(
-                recordHour,
-                parseInt(timestampParts[1], 10),
-                parseInt(timestampParts[2], 10),
-                0,
-              )
+              displayTimestamp = new Date(dateObj)
+              if (dbHours !== null && dbMinutes !== null) {
+                displayTimestamp.setHours(dbHours, dbMinutes, 0, 0)
+              } else {
+                displayTimestamp.setHours(
+                  recordTimestamp.getHours(),
+                  recordTimestamp.getMinutes(),
+                  0,
+                  0,
+                )
+              }
 
-              rawRecords.push({
-                timestamp: shiftDate,
-                originalTimestamp: new Date(record.timestamp),
-                status: record.status,
-                counter: record.counter,
-              })
+              const isInShift1Or2 =
+                (dbHours >= 7 && dbHours < 24) || (dbHours == 0 && dbMinutes == 0)
+
+              if (isInShift1Or2) {
+                rawRecords.push({
+                  timestamp: recordTimestamp,
+                  displayTimestamp: displayTimestamp,
+                  status: record.status,
+                  counter: record.counter,
+                  rawTime:
+                    formattedTime ||
+                    `${recordTimestamp.getHours().toString().padStart(2, '0')}:${recordTimestamp.getMinutes().toString().padStart(2, '0')}`,
+                  rawTimestamp: record.timestamp,
+                })
+              }
+            } else if (shiftGroup === 'shift3') {
+              const nextDayStr = nextDayObj.toISOString().slice(0, 10)
+              if (recordDateStr !== nextDayStr) {
+                return
+              }
+
+              displayTimestamp = new Date(nextDayObj)
+              if (dbHours !== null && dbMinutes !== null) {
+                displayTimestamp.setHours(dbHours, dbMinutes, 0, 0)
+              } else {
+                displayTimestamp.setHours(
+                  recordTimestamp.getHours(),
+                  recordTimestamp.getMinutes(),
+                  0,
+                  0,
+                )
+              }
+
+              const isInShift3 = dbHours >= 0 && dbHours < 7
+
+              if (isInShift3) {
+                rawRecords.push({
+                  timestamp: recordTimestamp,
+                  displayTimestamp: displayTimestamp,
+                  status: record.status,
+                  counter: record.counter,
+                  rawTime:
+                    formattedTime ||
+                    `${recordTimestamp.getHours().toString().padStart(2, '0')}:${recordTimestamp.getMinutes().toString().padStart(2, '0')}`,
+                  rawTimestamp: record.timestamp,
+                })
+              }
             }
           })
         }
       })
     }
 
-    rawRecords.sort((a, b) => a.timestamp - b.timestamp)
-
-    let lastRecordShift1 = null
-    const shift1End = new Date(selectedDate)
-    shift1End.setHours(16, 0, 0, 0)
-
-    for (let i = 0; i < rawRecords.length; i++) {
-      if (rawRecords[i].timestamp < shift1End) {
-        lastRecordShift1 = rawRecords[i]
-      } else {
-        break
-      }
-    }
-
-    const shift2Start = new Date(selectedDate)
-    shift2Start.setHours(16, 0, 0, 0)
-
-    const shift2Records = rawRecords.filter(
-      (record) =>
-        record.timestamp >= shift2Start &&
-        record.timestamp.getDate() === selectedDateObj.getDate() &&
-        record.timestamp.getHours() >= 16,
-    )
-
-    if (
-      lastRecordShift1 &&
-      (!shift2Records.length ||
-        shift2Records[0].timestamp.getHours() > 16 ||
-        shift2Records[0].timestamp.getMinutes() > 0)
-    ) {
-      const continuityRecord = {
-        timestamp: new Date(shift2Start),
-        status: lastRecordShift1.status,
-        counter: lastRecordShift1.counter,
-        isContinuity: true,
-        sourceTimestamp: lastRecordShift1.timestamp,
-      }
-      rawRecords.push(continuityRecord)
-      rawRecords.sort((a, b) => a.timestamp - b.timestamp)
-    }
-
-    let lastRecordShift2 = null
-    const shift2End = new Date(selectedDate)
-    shift2End.setHours(23, 59, 59, 999)
-
-    for (let i = 0; i < rawRecords.length; i++) {
-      if (rawRecords[i].timestamp <= shift2End) {
-        lastRecordShift2 = rawRecords[i]
-      } else {
-        break
-      }
-    }
-
-    const shift3Start = new Date(nextDateStr)
-    shift3Start.setHours(0, 0, 0, 0)
-
-    const shift3Records = rawRecords.filter(
-      (record) =>
-        record.timestamp.getDate() === nextDateObj.getDate() && record.timestamp.getHours() < 7,
-    )
-
-    if (
-      lastRecordShift2 &&
-      (!shift3Records.length ||
-        shift3Records[0].timestamp.getHours() > 0 ||
-        shift3Records[0].timestamp.getMinutes() > 0)
-    ) {
-      const continuityRecord = {
-        timestamp: new Date(shift3Start),
-        status: lastRecordShift2.status,
-        counter: lastRecordShift2.counter,
-        isContinuity: true,
-        sourceTimestamp: lastRecordShift2.timestamp,
-      }
-      rawRecords.push(continuityRecord)
-      rawRecords.sort((a, b) => a.timestamp - b.timestamp)
-    }
-
-    const shifts = shiftRanges.map((shift) => {
-      const progressSegments = createProgressSegments(shift, selectedDate, rawRecords)
-
-      return {
-        name: shift.name,
-        progressSegments: progressSegments,
-        shiftStartHour: shift.start,
-        shiftEndHour: shift.end,
-      }
-    })
-
-    return {
-      machineInfo: data.machineInfo,
-      shifts: shifts,
-    }
+    return rawRecords
   }
 
-  const createProgressSegments = (shift, selectedDate, records) => {
+  const createProgressSegments = (shift, shiftStartTime, shiftEndTime, records) => {
     if (!records || records.length === 0) {
       return []
     }
 
-    const baseDate = new Date(selectedDate)
-    const nextDate = new Date(selectedDate)
-    nextDate.setDate(nextDate.getDate() + 1)
-
-    let shiftStartDate, shiftEndDate
-
-    if (shift.name === 'Shift 1') {
-      shiftStartDate = new Date(baseDate)
-      shiftStartDate.setHours(shift.start, 0, 0, 0)
-
-      shiftEndDate = new Date(baseDate)
-      shiftEndDate.setHours(shift.end, 0, 0, 0)
-    } else if (shift.name === 'Shift 2') {
-      shiftStartDate = new Date(baseDate)
-      shiftStartDate.setHours(shift.start, 0, 0, 0)
-
-      shiftEndDate = new Date(nextDate)
-      shiftEndDate.setHours(0, 0, 0, 0)
-    } else if (shift.name === 'Shift 3') {
-      shiftStartDate = new Date(nextDate)
-      shiftStartDate.setHours(0, 0, 0, 0)
-
-      shiftEndDate = new Date(nextDate)
-      shiftEndDate.setHours(shift.end, 0, 0, 0)
-    }
-
-    const shiftRecords = records.filter((record) => {
-      return record.timestamp >= shiftStartDate && record.timestamp < shiftEndDate
-    })
-
-    if (shiftRecords.length === 0) {
-      return []
-    }
-
-    shiftRecords.sort((a, b) => a.timestamp - b.timestamp)
-
-    const shiftDurationMinutes = (shiftEndDate - shiftStartDate) / (60 * 1000)
-
     const segments = []
 
-    if (shiftRecords.length > 0) {
-      const firstRecord = shiftRecords[0]
-      const initialPadMinutes = (firstRecord.timestamp - shiftStartDate) / (60 * 1000)
-      const initialPadWidth = (initialPadMinutes / shiftDurationMinutes) * 100
+    let shiftDuration
+    if (shift.name === 'Shift 1') {
+      shiftDuration = 9
+    } else if (shift.name === 'Shift 2') {
+      shiftDuration = 8
+    } else {
+      shiftDuration = 7
+    }
 
-      if (initialPadWidth > 0.1) {
+    if (records[0].displayTimestamp > shiftStartTime) {
+      let initialPadPercentage
+
+      if (shift.name === 'Shift 1') {
+        const firstRecordHour = records[0].displayTimestamp.getHours()
+        const firstRecordMinute = records[0].displayTimestamp.getMinutes()
+        initialPadPercentage =
+          ((firstRecordHour - 7 + firstRecordMinute / 60) / shiftDuration) * 100
+      } else if (shift.name === 'Shift 2') {
+        const firstRecordHour = records[0].displayTimestamp.getHours()
+        const firstRecordMinute = records[0].displayTimestamp.getMinutes()
+        initialPadPercentage =
+          ((firstRecordHour - 16 + firstRecordMinute / 60) / shiftDuration) * 100
+      } else {
+        const firstRecordHour = records[0].displayTimestamp.getHours()
+        const firstRecordMinute = records[0].displayTimestamp.getMinutes()
+        initialPadPercentage = ((firstRecordHour + firstRecordMinute / 60) / shiftDuration) * 100
+      }
+
+      if (initialPadPercentage > 0.1) {
         segments.push({
           status: 'EMPTY',
-          value: initialPadWidth,
-          displayTime: `${shiftStartDate.getHours().toString().padStart(2, '0')}:00`,
+          value: initialPadPercentage,
+          displayTime: `${shiftStartTime.getHours().toString().padStart(2, '0')}:00`,
           isEmpty: true,
         })
       }
     }
 
-    for (let i = 0; i < shiftRecords.length; i++) {
-      const currentRecord = shiftRecords[i]
-      const nextRecord = i < shiftRecords.length - 1 ? shiftRecords[i + 1] : null
+    for (let i = 0; i < records.length; i++) {
+      const currentRecord = records[i]
+      const nextRecord = i < records.length - 1 ? records[i + 1] : null
 
-      const actualStartTimestamp =
-        currentRecord.isContinuity && currentRecord.sourceTimestamp
-          ? currentRecord.sourceTimestamp
-          : currentRecord.timestamp
-
-      const startTime = currentRecord.timestamp
-      let endTime
+      let segmentPercentage
 
       if (nextRecord) {
-        endTime = nextRecord.timestamp
+        if (shift.name === 'Shift 1') {
+          const currentHour = currentRecord.displayTimestamp.getHours()
+          const currentMinute = currentRecord.displayTimestamp.getMinutes()
+          const nextHour = nextRecord.displayTimestamp.getHours()
+          const nextMinute = nextRecord.displayTimestamp.getMinutes()
+
+          const currentPosition = (currentHour - 7 + currentMinute / 60) / shiftDuration
+          const nextPosition = (nextHour - 7 + nextMinute / 60) / shiftDuration
+
+          segmentPercentage = (nextPosition - currentPosition) * 100
+        } else if (shift.name === 'Shift 2') {
+          const currentHour = currentRecord.displayTimestamp.getHours()
+          const currentMinute = currentRecord.displayTimestamp.getMinutes()
+          const nextHour = nextRecord.displayTimestamp.getHours()
+          const nextMinute = nextRecord.displayTimestamp.getMinutes()
+
+          const currentPosition = (currentHour - 16 + currentMinute / 60) / shiftDuration
+          const nextPosition = (nextHour - 16 + nextMinute / 60) / shiftDuration
+
+          segmentPercentage = (nextPosition - currentPosition) * 100
+        } else {
+          const currentHour = currentRecord.displayTimestamp.getHours()
+          const currentMinute = currentRecord.displayTimestamp.getMinutes()
+          const nextHour = nextRecord.displayTimestamp.getHours()
+          const nextMinute = nextRecord.displayTimestamp.getMinutes()
+
+          const currentPosition = (currentHour + currentMinute / 60) / shiftDuration
+          const nextPosition = (nextHour + nextMinute / 60) / shiftDuration
+
+          segmentPercentage = (nextPosition - currentPosition) * 100
+        }
       } else {
-        endTime = new Date(shiftEndDate)
+        if (shift.name === 'Shift 1') {
+          const currentHour = currentRecord.displayTimestamp.getHours()
+          const currentMinute = currentRecord.displayTimestamp.getMinutes()
+
+          const currentPosition = (currentHour - 7 + currentMinute / 60) / shiftDuration
+          segmentPercentage = (1 - currentPosition) * 100
+        } else if (shift.name === 'Shift 2') {
+          const currentHour = currentRecord.displayTimestamp.getHours()
+          const currentMinute = currentRecord.displayTimestamp.getMinutes()
+
+          const currentPosition = (currentHour - 16 + currentMinute / 60) / shiftDuration
+          segmentPercentage = (1 - currentPosition) * 100
+        } else {
+          const currentHour = currentRecord.displayTimestamp.getHours()
+          const currentMinute = currentRecord.displayTimestamp.getMinutes()
+
+          const currentPosition = (currentHour + currentMinute / 60) / shiftDuration
+          segmentPercentage = (1 - currentPosition) * 100
+        }
       }
-
-      const durationMinutes = (endTime - startTime) / (60 * 1000)
-
-      const width = (durationMinutes / shiftDurationMinutes) * 100
 
       let durationDisplay = ''
       if (currentRecord.isContinuity && currentRecord.sourceTimestamp) {
-        const durationMs = endTime - actualStartTimestamp
+        const endTime = nextRecord ? nextRecord.timestamp : shiftEndTime
+        const durationMs = endTime - currentRecord.sourceTimestamp
         const durationHours = Math.floor(durationMs / (1000 * 60 * 60))
         const durationMinutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60))
         durationDisplay = ` (${durationHours}h ${durationMinutes}m total)`
       }
 
+      const displayTime =
+        currentRecord.displayTime ||
+        `${currentRecord.displayTimestamp.getHours().toString().padStart(2, '0')}:${currentRecord.displayTimestamp.getMinutes().toString().padStart(2, '0')}`
+
       segments.push({
         status: currentRecord.status,
-        value: Math.max(0.1, width),
-        displayTime: `${startTime.getHours().toString().padStart(2, '0')}:${startTime.getMinutes().toString().padStart(2, '0')}`,
+        value: Math.max(0.1, segmentPercentage),
+        displayTime: displayTime,
         durationDisplay: durationDisplay,
         isContinuity: currentRecord.isContinuity,
-        sourceTime: currentRecord.isContinuity
-          ? `${actualStartTimestamp.getHours().toString().padStart(2, '0')}:${actualStartTimestamp.getMinutes().toString().padStart(2, '0')}`
-          : null,
+        sourceTime: currentRecord.sourceTime,
       })
     }
 
@@ -537,7 +696,7 @@ const MachineDetail = () => {
                                       ? `${segment.displayTime}: ${segment.status} (Continued from ${segment.sourceTime})${segment.durationDisplay}`
                                       : `${segment.displayTime}: ${segment.status}`
                                 }
-                                variant={segment.isEmpty ? 'none' : undefined}
+                                variant={segment.isEmpty ? undefined : undefined}
                               />
                             ))}
                         </CProgressStacked>
